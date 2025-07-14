@@ -671,7 +671,17 @@ class ModelBuilder:
         ]
 
         for attr in more_builder_attrs:
-            getattr(self, attr).extend(getattr(builder, attr))
+            self_val = getattr(self, attr)
+            builder_val = getattr(builder, attr)
+
+            if isinstance(self_val, list) and isinstance(builder_val, list):
+                self_val.extend(builder_val)
+            # elif isinstance(self_val, np.ndarray) and isinstance(builder_val, np.ndarray):
+            #     combined = np.concatenate((self_val, builder_val), axis=0)
+            #     setattr(self, attr, combined)
+            else:
+                print(f"Didn't merge {attr} between the two builders")
+                # raise ValueError("Unable to merge attributes of the two builder objects")
 
         self.joint_dof_count += builder.joint_dof_count
         self.joint_coord_count += builder.joint_coord_count

@@ -150,6 +150,7 @@ def _fill_triangle_indices(
         beg = face_offsets[fid - 1]
     end = face_offsets[fid]
 
+    # converting polygon to triangle
     for t in range(beg, end - 2):
         tri_index = t - 2 * fid
         tri_vertex_indices[3 * tri_index + 0] = face_vertex_indices[beg]
