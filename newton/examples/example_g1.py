@@ -42,7 +42,7 @@ class Example:
         newton.utils.parse_mjcf(
             str(asset_path / "g1_29dof_with_hand_rev_1_0.xml"),
             articulation_builder,
-            collapse_fixed_joints=True,
+            collapse_fixed_joints=False,
             up_axis="Z",
             enable_self_collisions=False,
         )
@@ -184,7 +184,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--show_mujoco_viewer",
         type=bool,
-        default=False,
+        default=True,
         help="Show MuJoCo viewer next to Newton renderer if MuJoCoSolver is used.",
     )
     parser.add_argument("--use_cuda_graph", default=True, action=argparse.BooleanOptionalAction)

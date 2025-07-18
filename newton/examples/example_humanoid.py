@@ -110,7 +110,7 @@ class Example:
             self.state_0, self.state_1 = self.state_1, self.state_0
 
     def step(self):
-        with wp.ScopedTimer("step", active=False):
+        with wp.ScopedTimer("step", active=True):
             if self.use_cuda_graph:
                 wp.capture_launch(self.graph)
             else:
@@ -121,7 +121,7 @@ class Example:
         if self.renderer is None:
             return
 
-        with wp.ScopedTimer("render", active=False):
+        with wp.ScopedTimer("render", active=True):
             self.renderer.begin_frame(self.sim_time)
             self.renderer.render(self.state_0)
             self.renderer.end_frame()
@@ -139,7 +139,7 @@ if __name__ == "__main__":
         help="Path to the output USD file.",
     )
     parser.add_argument("--num_frames", type=int, default=12000, help="Total number of frames.")
-    parser.add_argument("--num_envs", type=int, default=9, help="Total number of simulated environments.")
+    parser.add_argument("--num_envs", type=int, default=1, help="Total number of simulated environments.")
     parser.add_argument("--use_cuda_graph", default=True, action=argparse.BooleanOptionalAction)
 
     args = parser.parse_known_args()[0]
@@ -147,9 +147,25 @@ if __name__ == "__main__":
     with wp.ScopedDevice(args.device):
         example = Example(stage_path=args.stage_path, num_envs=args.num_envs, use_cuda_graph=args.use_cuda_graph)
 
+        show_mujoco_viewer = True
+
+        if show_mujoco_viewer:
+            import mujoco
+            import mujoco.viewer
+            import mujoco_warp
+
+            mjm, mjd = example.solver.mj_model, example.solver.mj_data
+            m, d = example.solver.mjw_model, example.solver.mjw_data
+            viewer = mujoco.viewer.launch_passive(mjm, mjd)
+
         for frame_idx in range(args.num_frames):
             example.step()
             example.render()
+
+            if show_mujoco_viewer:
+                if not example.solver.use_mujoco:
+                    mujoco_warp.get_data_into(mjd, mjm, d)
+                viewer.sync()
 
             if example.renderer is None:
                 print(f"[{frame_idx:4d}/{args.num_frames}]")

@@ -78,9 +78,12 @@ class Example:
             limit_ke=1.0e3,
             limit_kd=1.0e1,
         )
+        # builder.default_shape_cfg.ke = 5.0e4
+        # builder.default_shape_cfg.kd = 5.0e2
+        # builder.default_shape_cfg.kf = 1.0e3
         builder.default_shape_cfg.ke = 5.0e4
-        builder.default_shape_cfg.kd = 5.0e2
-        builder.default_shape_cfg.kf = 1.0e3
+        builder.default_shape_cfg.kd = 5.0e4
+        builder.default_shape_cfg.kf = 1.0e4
         builder.default_shape_cfg.mu = 0.75
 
         asset_path = newton.utils.download_asset("anymal_c_simple_description")
@@ -138,6 +141,12 @@ class Example:
         # finalize model
         self.model = builder.finalize()
 
+        initial_pose = wp.to_torch(self.model.joint_X_p).clone()
+        initial_pose = initial_pose.reshape(-1, 7)
+        initial_pose[0, 1] = 0.75  # upward
+        initial_pose = initial_pose.reshape(-1, 7)
+        self.model.joint_X_p = wp.from_torch(initial_pose, dtype=wp.transform)
+
         # the policy was trained with the following inertia tensors
         # fmt: off
         self.model.body_inertia = wp.array(
@@ -180,8 +189,9 @@ class Example:
         self.collider_rest_points = collider_points
         self.collider_shape_ids = wp.array(collider_v_shape_ids, dtype=int)
 
-        self.solver = newton.solvers.FeatherstoneSolver(self.model)
-
+        # self.solver = newton.solvers.FeatherstoneSolver(self.model)
+        self.solver = newton.solvers.MuJoCoSolver(self.model, solver="newton")
+        
         options = ImplicitMPMSolver.Options()
         options.voxel_size = voxel_size
         options.max_fraction = max_fraction
@@ -225,9 +235,9 @@ class Example:
             self.robot_graph = None
 
     def simulate_robot(self):
-        self.contacts = self.model.collide(self.state_0, rigid_contact_margin=0.1)
         for _ in range(self.sim_substeps):
             self.state_0.clear_forces()
+            self.contacts = self.model.collide(self.state_0, rigid_contact_margin=0.1)
             self.controller.assign_control(self.control, self.state_0)
             self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.sim_dt)
             self.state_0, self.state_1 = self.state_1, self.state_0

@@ -704,12 +704,20 @@ def parse_mjcf(
                 I_m[2, 0] = I_m[0, 2]
                 I_m[2, 1] = I_m[1, 2]
             rot = wp.quat_to_matrix(inertial_frame.q)
-            I_m = rot @ wp.mat33(I_m)
+            rot_np = np.array(rot).reshape(3, 3)
+            
+            I_m = rot_np @ I_m @ rot_np.T
+            print(f"Inertia {body_name} \n")
+            print(f"{I_m}")
+            
+            I_m = wp.mat33(I_m)
+
             m = float(inertial_attrib.get("mass", "0"))
             builder.body_mass[link] = m
             builder.body_inv_mass[link] = 1.0 / m if m > 0.0 else 0.0
             builder.body_com[link] = com
             builder.body_inertia[link] = I_m
+
             if any(x for x in I_m):
                 builder.body_inv_inertia[link] = wp.inverse(I_m)
             else:

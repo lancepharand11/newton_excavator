@@ -1,0 +1,110 @@
+<mujoco model="excavator">
+  <option iterations="50" timestep="0.001" solver="PGS" gravity="0 0 -9.81" />
+
+  <compiler angle="radian" meshdir="meshes" eulerseq="zyx" autolimits="true" inertiafromgeom="false" />
+
+  <default>
+    <joint limited="true" damping="0.01" armature="0.01" frictionloss="0.01" />
+    <geom condim="4" contype="1" conaffinity="15" friction="0.9 0.2 0.2" solref="0.001 2" />
+    <motor ctrllimited="true" />
+    <equality solref="0.001 2" />
+    <default class="visualgeom">
+      <geom material="visualgeom" condim="1" contype="0" conaffinity="0" />
+    </default>
+  </default>
+
+  <asset>
+    <mesh name="base_link" content_type="model/stl" file="base_link.STL" />
+    <mesh name="link2" content_type="model/stl" file="link2.STL" />
+    <mesh name="link3" content_type="model/stl" file="link3.STL" />
+    <mesh name="link4" content_type="model/stl" file="link4.STL" />
+    <mesh name="link5" content_type="model/stl" file="link5.STL" />
+    <mesh name="kanan" content_type="model/stl" file="kanan.STL" />
+    <mesh name="kiri" content_type="model/stl" file="kiri.STL" />
+    <texture name="texplane" type="2d" builtin="checker" rgb1=".0 .0 .0" rgb2=".8 .8 .8" width="100" height="100" />
+    <material name="matplane" reflectance="0." texture="texplane" texrepeat="1 1" texuniform="true" />
+    <material name="visualgeom" rgba="0.5 0.9 0.2 1" />
+  </asset>
+
+  <worldbody>
+    <light directional="true" diffuse="0.4 0.4 0.4" specular="0.1 0.1 0.1" pos="0 0 5.0" dir="0 0 -1" castshadow="false" />
+    <light directional="true" diffuse="0.6 0.6 0.6" specular="0.2 0.2 0.2" pos="0 0 4" dir="0 0 -1" />
+    <geom name="ground" type="plane" pos="0 0 0" size="100 100 0.001" quat="1 0 0 0" material="matplane" condim="3" conaffinity="15" />
+    <camera name="fixed" pos="0 -3.0 4.2055612659619985" xyaxes="1 0 0 0 0 1" />
+    <camera name="track" mode="trackcom" pos="0 -3.0 4.2055612659619985" xyaxes="1 0 0 0 0 1" />
+    <body name="root" pos="0 0 3.705561265961998" quat="1 0 0 0">
+      <freejoint name="root" />
+      <site name="imu" size="0.01" pos="0 0 0" />
+      <geom type="mesh" mesh="base_link" contype="1" conaffinity="0" density="0" group="1" class="visualgeom" />
+      <geom type="mesh" rgba="" mesh="base_link" />
+      <body name="link2" pos="-0.8585 -0.0825 1.466" quat="0.99929 0 0 0.0376751">
+        <inertial pos="-0.617652 0.169249 -0.748551" quat="0.00741967 0.729 -0.0111167 0.684383" mass="14373.8" diaginertia="36495 27044.8 11867.4" />
+        <joint name="link2_to_base" pos="0 0 0" axis="0 0 1" range="-3.1 3.1" actuatorfrcrange="-300 300" />
+        <geom type="mesh" mesh="link2" contype="1" conaffinity="0" density="0" group="1" class="visualgeom" />
+        <geom type="mesh" rgba="" mesh="link2" />
+        <body name="link3" pos="1.306 -0.015884 -0.544" quat="0.984614 0.00643318 0.170633 -0.0371218">
+          <inertial pos="3.00116 -3.7238e-06 2.0242" quat="0.577347 0.408253 0.408253 0.577346" mass="2653.36" diaginertia="10753.7 10383.4 559.786" />
+          <joint name="link3_to_link2" pos="0 0 0" axis="0 1 0" range="-0.954 1.03" actuatorfrcrange="-300 300" />
+          <geom type="mesh" mesh="link3" contype="1" conaffinity="0" density="0" group="1" class="visualgeom" />
+          <geom type="mesh" rgba="" mesh="link3" />
+          <body name="link4" pos="6.9891 0 2.5506" quat="0.979454 0 0.201667 0">
+            <inertial pos="0.544768 6.5999e-07 0.709714" quat="0.504669 0.495287 0.495287 0.504669" mass="112.346" diaginertia="99.0428 96.9228 9.66543" />
+            <joint name="link4_to_link3" pos="0 0 0" axis="0 1 0" range="-0.1214 1.51" actuatorfrcrange="-300 300" />
+            <geom type="mesh" mesh="link4" contype="1" conaffinity="0" density="0" group="1" class="visualgeom" />
+            <geom type="mesh" rgba="" mesh="link4" />
+            <body name="link5" pos="2.6047 0 0.78507" quat="0.904472 0 -0.426532 0">
+              <inertial pos="1.00851 5.56159e-07 0.420927" quat="-9.94122e-05 0.832938 6.60449e-05 0.553366" mass="642.549" diaginertia="675.043 453.693 451.964" />
+              <joint name="link5_to_link4" pos="0 0 0" axis="0 1 0" range="-0.32 3.14" actuatorfrcrange="-300 300" />
+              <geom type="mesh" mesh="link5" contype="1" conaffinity="0" density="0" group="1" class="visualgeom" />
+              <geom type="mesh" rgba="" mesh="link5" />
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="kanan">
+        <inertial pos="0.137803 -1.6097 -0.780803" quat="0.492951 0.492967 -0.506938 0.506948" mass="1073" diaginertia="77.9794 71.1841 52.491" />
+        <joint name="base_to_kanan" pos="0 0 0" axis="0 1 0" />
+        <geom type="mesh" mesh="kanan" contype="1" conaffinity="0" density="0" group="1" class="visualgeom" />
+        <geom type="mesh" rgba="" mesh="kanan" />
+      </body>
+      <body name="kiri">
+        <inertial pos="0.137815 1.6097 -0.780803" quat="0.493056 0.493066 -0.506836 0.506852" mass="1073" diaginertia="77.9792 71.1842 52.491" />
+        <joint name="base_to_kiri" pos="0 0 0" axis="0 1 0" />
+        <geom type="mesh" mesh="kiri" contype="1" conaffinity="0" density="0" group="1" class="visualgeom" />
+        <geom type="mesh" rgba="" mesh="kiri" />
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <motor name="link2_to_base" joint="link2_to_base" ctrllimited="true" ctrlrange="-300 300" gear="1" />
+    <motor name="link3_to_link2" joint="link3_to_link2" ctrllimited="true" ctrlrange="-300 300" gear="1" />
+    <motor name="link4_to_link3" joint="link4_to_link3" ctrllimited="true" ctrlrange="-300 300" gear="1" />
+    <motor name="link5_to_link4" joint="link5_to_link4" ctrllimited="true" ctrlrange="-300 300" gear="1" />
+    <motor name="base_to_kanan" joint="base_to_kanan" ctrllimited="true" ctrlrange="-1 1" gear="1" />
+    <motor name="base_to_kiri" joint="base_to_kiri" ctrllimited="true" ctrlrange="-1 1" gear="1" />
+  </actuator>
+
+  <sensor>
+    <actuatorpos name="link2_to_base_p" actuator="link2_to_base" />
+    <actuatorvel name="link2_to_base_v" actuator="link2_to_base" />
+    <actuatorfrc name="link2_to_base_f" actuator="link2_to_base" noise="0.001" />
+    <actuatorpos name="link3_to_link2_p" actuator="link3_to_link2" />
+    <actuatorvel name="link3_to_link2_v" actuator="link3_to_link2" />
+    <actuatorfrc name="link3_to_link2_f" actuator="link3_to_link2" noise="0.001" />
+    <actuatorpos name="link4_to_link3_p" actuator="link4_to_link3" />
+    <actuatorvel name="link4_to_link3_v" actuator="link4_to_link3" />
+    <actuatorfrc name="link4_to_link3_f" actuator="link4_to_link3" noise="0.001" />
+    <actuatorpos name="link5_to_link4_p" actuator="link5_to_link4" />
+    <actuatorvel name="link5_to_link4_v" actuator="link5_to_link4" />
+    <actuatorfrc name="link5_to_link4_f" actuator="link5_to_link4" noise="0.001" />
+    <actuatorpos name="base_to_kanan_p" actuator="base_to_kanan" />
+    <actuatorvel name="base_to_kanan_v" actuator="base_to_kanan" />
+    <actuatorfrc name="base_to_kanan_f" actuator="base_to_kanan" noise="0.001" />
+    <actuatorpos name="base_to_kiri_p" actuator="base_to_kiri" />
+    <actuatorvel name="base_to_kiri_v" actuator="base_to_kiri" />
+    <actuatorfrc name="base_to_kiri_f" actuator="base_to_kiri" noise="0.001" />
+    <framequat name="orientation" objtype="site" noise="0.001" objname="imu" />
+    <gyro name="angular-velocity" site="imu" noise="0.005" cutoff="34.9" />
+  </sensor>
+</mujoco>

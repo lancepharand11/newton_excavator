@@ -10,8 +10,13 @@ import sys
 import newton
 from newton.solvers.featherstone import FeatherstoneSolver
 from newton.solvers.implicit_mpm import ImplicitMPMSolver
+from newton.solvers.mujoco import MuJoCoSolver
 import newton.utils
 import newton.sim
+
+import newton.solvers.euler.kernels  # For graph capture on CUDA <12.3
+import newton.solvers.euler.particles  # For graph capture on CUDA <12.3
+import newton.solvers.solver  # For graph capture on CUDA <12.3
 
 
 @wp.kernel
@@ -40,66 +45,99 @@ def update_collider_mesh(
 
 class Excavator:
     def __init__(self, dune_params: list, options: argparse.Namespace):
-        builder = newton.ModelBuilder(up_axis=newton.Axis.Z)
+        articulation_builder = newton.ModelBuilder(up_axis=newton.Axis.Z)
         self.device = wp.get_device()
 
         # NOTE: may need to update these
-        builder.default_body_armature = 0.01
-        builder.default_joint_cfg.armature = 0.01
-        builder.default_joint_cfg.mode = newton.JOINT_MODE_TARGET_POSITION
-        builder.default_joint_cfg.target_ke = 2000.0
-        builder.default_joint_cfg.target_kd = 1.0
-        builder.default_shape_cfg.ke = 3.0e6
-        builder.default_shape_cfg.kd = 1.5e4
-        builder.default_shape_cfg.kf = 1.0e2
-        builder.default_shape_cfg.mu = 1.0
+        articulation_builder.default_body_armature = 0.01
+        articulation_builder.default_joint_cfg.armature = 0.01
+        articulation_builder.default_joint_cfg.mode = newton.JOINT_MODE_TARGET_POSITION
+        articulation_builder.default_joint_cfg.target_ke = 10.0
+        articulation_builder.default_joint_cfg.target_kd = 3.0
 
-        # articulation_builder = newton.ModelBuilder()
-        # articulation_builder.default_body_armature = 0.01
-        # articulation_builder.default_joint_cfg.armature = 0.01
-        # articulation_builder.default_joint_cfg.mode = newton.JOINT_MODE_TARGET_POSITION
-        # articulation_builder.default_joint_cfg.target_ke = 2000.0
-        # articulation_builder.default_joint_cfg.target_kd = 1.0
-        # articulation_builder.default_shape_cfg.ke = 1.0e4
-        # articulation_builder.default_shape_cfg.kd = 1.0e2
-        # articulation_builder.default_shape_cfg.kf = 1.0e2
-        # articulation_builder.default_shape_cfg.mu = 1.0
-        
-        newton.utils.parse_urdf(
-            Excavator.get_asset("excavator.urdf"),
-            builder,
-            xform=wp.transform([0, -7, 1.3], wp.quat_identity()),
-            floating=True, 
-            enable_self_collisions=True,
+        # Excavator always spawns inside the floor regardless of xform used in parse_urdf (bug)
+        # !!! Temporary solution until issue #259 on github is solved
+        # Issue #259: When the asset is moved upward out of floor, it's only visual and the collision isn't cleared. 
+        # Make sense since 1e6 contact damping is needed to prevent the excavator from flying away 
+        articulation_builder.default_shape_cfg.ke = 1.0e4
+        articulation_builder.default_shape_cfg.kd = 1.0e2
+        articulation_builder.default_shape_cfg.kf = 1.0e2
+        # builder.default_shape_cfg.ke = 1.0e2
+        # builder.default_shape_cfg.kd = 1.0e2
+        # builder.default_shape_cfg.kf = 1.0e2
+        articulation_builder.default_shape_cfg.mu = 1.0
+
+        # newton.utils.parse_urdf(
+        #     Excavator.get_asset("excavator.urdf"),
+        #     articulation_builder,
+        #     up_axis=newton.Axis.Z,
+        #     xform=wp.transform([0.0, 0.0, 0.0], wp.quat_identity()),
+        #     floating=True,  
+        #     enable_self_collisions=True,
+        #     ignore_inertial_definitions=False,
+        #     force_show_colliders=True,
+        # )
+        newton.utils.parse_mjcf(
+            Excavator.get_asset("excavator.xml"),
+            articulation_builder,
+            up_axis=newton.Axis.Z,
+            xform=wp.transform([0.0, 0.0, 0.0], wp.quat_identity()),
+            floating=None,  
+            # enable_self_collisions=True,
             ignore_inertial_definitions=False,
-            force_show_colliders=True,
+            # force_show_colliders=True,
+            ignore_names=["floor", "ground"],
         )
+        # [0.0, -5.0, 1.31]
+
+        builder = newton.ModelBuilder(up_axis=newton.Axis.Z)
+        builder.add_builder(builder=articulation_builder, 
+                            xform=wp.transform([0.0, -5.0, 0.0], wp.quat_identity()))
         builder.add_ground_plane()
 
+        # Needed so the excavator doesn't fall through the ground (it's too heavy and can't counter this weight with contact stiffness params)
+        # -1 is the world frame
+        # builder.add_joint(joint_type=newton.JOINT_PRISMATIC,
+        #                   parent=-1,  
+        #                   child=builder.body_key.index("base_link"),
+        #                   axis=[0, 0, 1],  # lock height
+        #                   limits=[0.0, 0.0],
+        #                   )
+
+        # lock_roll = newton.ModelBuilder.JointDofConfig(axis=Axis.X, limit_lower=-0.01, limit_upper=0.01)
+        # lock_pitch = newton.ModelBuilder.JointDofConfig(axis=Axis.Y, limit_lower=-0.01, limit_upper=0.01)
+
+        # builder.add_joint(joint_type=newton.JOINT_REVOLUTE,
+        #                   parent=-1,
+        #                   child=builder.body_key.index("base_link"),
+        #                   linear_axes=[lock_roll, lock_pitch], 
+        #                   )
+
         self.actuated_joints = 4
-        init_vals = [0.0, 0.646, 2.47, -1.92]  # rads
+        # target_vals = [0.0, 0.646, 2.47, -1.92]  # rads
+        init_vals = [0.0, 0.4, 0.0, 0.0]  # rads
+        target_vals = [0.0, 0.8, 0.0, 0.0]  # rads
         # init_vals = [0.0, 0.8, 0.0, 0.0]  # rads
         builder.joint_q[-self.actuated_joints:] = init_vals
-        builder.joint_target[-self.actuated_joints:] = init_vals
+        builder.joint_target[-self.actuated_joints:] = target_vals
+        builder.joint_target[:-self.actuated_joints] = builder.joint_q[:-self.actuated_joints]
 
         # test_name = Excavator.get_asset("excavator.urdf")
         # if test_name:
         #     print("Got the filename: " + test_name)
 
-        # builder.add_builder(articulation_builder, 
-        #                     xform=wp.transform([0, 0, 0], wp.quat_identity()))
-        
-        builder.gravity = wp.vec3(options.gravity)
+        # options.grid_padding = 0 if options.dynamic_grid else 5
+        # builder.gravity = wp.vec3(options.gravity)
 
-        options.grid_padding = 0 if options.dynamic_grid else 5
         # options.yield_stresses = wp.vec3(
         #     options.yield_stress,
         #     -options.stretching_yield_stress,
         #     options.compression_yield_stress,
         # )
 
-        # add sand particles
-        Excavator._emit_gaussian_dunes(builder, dune_params, options)
+        # TODO: Uncomment
+        # # add sand particles
+        # Excavator._emit_gaussian_dunes(builder, dune_params, options)
 
         model: newton.Model = builder.finalize()
         self.model = model
@@ -137,85 +175,86 @@ class Excavator:
             dtype=wp.float32,
         )
 
-        # From anymal sand walk ex. Grab meshes for collisions 
-        collider_body_idx = [idx for idx, key in enumerate(builder.body_key) 
-                             if "link" in key]
-        collider_shape_ids = np.concatenate(
-            [[m for m in self.model.body_shapes[b] if self.model.shape_geo_src[m]] for b in collider_body_idx]
-        )
-
-        collider_points, collider_indices, collider_v_shape_ids = _merge_meshes(
-            [self.model.shape_geo_src[m].vertices for m in collider_shape_ids],
-            [self.model.shape_geo_src[m].indices for m in collider_shape_ids],
-            [self.model.shape_geo.scale.numpy()[m] for m in collider_shape_ids],
-            collider_shape_ids,
-        )
-
-        self.collider_mesh = wp.Mesh(wp.clone(collider_points), collider_indices, wp.zeros_like(collider_points))
-        self.collider_rest_points = collider_points
-        self.collider_shape_ids = wp.array(collider_v_shape_ids, dtype=int)
-
-        # mesh_pts, mesh_idx, scales, shape_id_list = [], [], [], []
-        # for body_idx in range(len(builder.body_key)):
-        #     for s in self.model.body_shapes[body_idx]:
-        #         geo = self.model.shape_geo_src[s]
-        #         if geo is None:
-        #             continue
-        #         mesh_pts.append(geo.vertices)
-        #         mesh_idx.append(geo.indices)
-        #         scales.append(self.model.shape_geo.scale.numpy()[s])
-        #         shape_id_list.append(np.full(len(geo.vertices), s, dtype=int))
-        # pts, idx, vid2shape = _merge_meshes(
-        #     mesh_pts, mesh_idx, scales, np.concatenate(shape_id_list)
+        # TODO: Uncomment
+        # # From anymal sand walk ex. Grab meshes for collisions w/ sand
+        # # collider_body_idx = [idx for idx, key in enumerate(builder.body_key) 
+        # #                      if "link" in key]
+        # # collider_body_idx = [idx for idx, key in enumerate(builder.body_key) 
+        # #                      if key == "base_link" or key == "base_chassis_link" or 
+        # #                      key == "stick_bucket_link"]
+        # collider_body_idx = [idx for idx, key in enumerate(builder.body_key) 
+        #                      if key == "base_link" or key == "stick_bucket_link"]
+        # collider_shape_ids = np.concatenate(
+        #     [[m for m in self.model.body_shapes[b] if self.model.shape_geo_src[m]] for b in collider_body_idx]
         # )
-        # self.collider_mesh = wp.Mesh(pts, idx, wp.zeros_like(pts))
-        # self.collider_rest_points = pts
-        # self.collider_shape_ids = wp.array(vid2shape, dtype=int)
+
+        # collider_points, collider_indices, collider_v_shape_ids = _merge_meshes(
+        #     [self.model.shape_geo_src[m].vertices for m in collider_shape_ids],
+        #     [self.model.shape_geo_src[m].indices for m in collider_shape_ids],
+        #     [self.model.shape_geo.scale.numpy()[m] for m in collider_shape_ids],
+        #     collider_shape_ids,
+        # )
+
+        # self.collider_mesh = wp.Mesh(wp.clone(collider_points), collider_indices, wp.zeros_like(collider_points))
+        # self.collider_rest_points = collider_points
+        # self.collider_shape_ids = wp.array(collider_v_shape_ids, dtype=int)
 
         self.sim_time = 0.0
         self.frame_dt = 1.0 / options.fps
         self.sim_substeps = options.substeps
         self.sim_dt = self.frame_dt / self.sim_substeps
 
-        self.solver = newton.solvers.FeatherstoneSolver(self.model)
+        # self.solver = newton.solvers.FeatherstoneSolver(self.model)
+        self.solver = newton.solvers.MuJoCoSolver(self.model, 
+                                                  disable_contacts=False,
+                                                  use_mujoco=False,  # needs to be false since parallelizing the MPM solver
+                                                  solver="newton",
+                                                  integrator="euler",
+                                                  iterations=10,
+                                                  ncon_per_env=150,
+                                                  ls_iterations=5,
+                                                  )
+        # TODO: Uncomment
+        # options_mpm = ImplicitMPMSolver.Options()
+        # options_mpm.voxel_size = options.voxel_size
+        # options_mpm.max_fraction = options.max_fraction
+        # options_mpm.tolerance = options.tolerance
+        # options_mpm.unilateral = options.unilateral
+        # options_mpm.max_iterations = options.max_iterations
+        # # options_mpm.gauss_seidel = False
+        # options_mpm.dynamic_grid = options.dynamic_grid
+        # if not options.dynamic_grid:
+        #     options_mpm.grid_padding = 5
 
-        options_mpm = ImplicitMPMSolver.Options()
-        options_mpm.voxel_size = options.voxel_size
-        options_mpm.max_fraction = options.max_fraction
-        options_mpm.tolerance = options.tolerance
-        options_mpm.unilateral = options.unilateral
-        options_mpm.max_iterations = options.max_iterations
-        # options_mpm.gauss_seidel = False
-        options_mpm.dynamic_grid = options.dynamic_grid
-        if not options.dynamic_grid:
-            options_mpm.grid_padding = 5
-
-        self.mpm_solver = ImplicitMPMSolver(self.model, options_mpm)
-        self.mpm_solver.setup_collider(self.model, [self.collider_mesh])
+        # self.mpm_solver = ImplicitMPMSolver(self.model, options_mpm)
+        # self.mpm_solver.setup_collider(self.model, [self.collider_mesh])
 
         if options.headless:
             self.renderer = None
         else:
-            self.renderer = newton.utils.SimRendererOpenGL(self.model, "Excavator + Dunes")
+            self.renderer = newton.utils.SimRendererOpenGL(self.model, "Excavator + Dunes", scaling=1.0, show_joints=True)
 
         self.state_0 = self.model.state()
         self.state_1 = self.model.state()
-
-        self.mpm_solver.enrich_state(self.state_0)
-        self.mpm_solver.enrich_state(self.state_1)
-
-        newton.sim.eval_fk(self.model, self.state_0.joint_q, self.state_0.joint_qd, self.state_0)
-        self._update_collider_mesh(self.state_0)
-
         self.control = self.model.control()
         # TODO: add control OR pretrained policy
 
+        # self.state_0.clear_forces()
+        # self.state_1.clear_forces()
+
+        # TODO: Uncomment
+        # self.mpm_solver.enrich_state(self.state_0)
+        # self.mpm_solver.enrich_state(self.state_1)
+        # self._update_collider_mesh(self.state_0)
+
+        newton.sim.eval_fk(self.model, self.model.joint_q, self.model.joint_qd, self.state_0)
+        
         self.use_cuda_graph = self.device.is_cuda and wp.is_mempool_enabled(wp.get_device())
         if self.use_cuda_graph:
-            # Initial graph launch, load modules (necessary for drivers prior to CUDA 12.3)
-            wp.load_module(newton.solvers.euler.kernels, device=wp.get_device())
-            wp.load_module(newton.solvers.euler.particles, device=wp.get_device())
-            wp.load_module(newton.solvers.solver, device=wp.get_device())
+            # # Initial graph launch, load modules (necessary for drivers prior to CUDA 12.3)
+            # wp.load_module(newton.solvers.euler.kernels, device=wp.get_device())
+            # wp.load_module(newton.solvers.euler.particles, device=wp.get_device())
+            # wp.load_module(newton.solvers.solver, device=wp.get_device())
 
             with wp.ScopedCapture() as capture:
                 self.simulate_robot()
@@ -223,54 +262,15 @@ class Excavator:
         else:
             self.robot_graph = None
 
-        # self.state_0 = model.state()
-        # self.state_1 = model.state()
-        # self.control = model.control()
-        # print(f"control object \n")
-        # print(self.control)
-        # self.contacts = model.collide(self.state_0)
-        
-        # self.sim_time = 0.0
-
-        # self.mpm_solver = ImplicitMPMSolver(self.model, options)
-        # self.mpm_solver.setup_collider(self.model, [self.collider_mesh])
-
-        # self.mpm_solver.enrich_state(self.state_0)
-        # self.mpm_solver.enrich_state(self.state_1)
-
-        # newton.sim.eval_fk(self.model, self.state_0.joint_q, self.state_0.joint_qd, self.state_0)
-        # self._update_collider_mesh(self.state_0)
-
-        # if options.headless:
-        #     self.renderer = None
-        # else:
-        #     self.renderer = newton.utils.SimRendererOpenGL(self.model, "Excavator + Dunes")
-
-        # newton.sim.eval_fk(self.model, self.model.joint_q, self.model.joint_qd, self.state_0)
-
-        # # simulate() allocates memory via a clone, so we can't use graph capture if the device does not support mempools
-        # self.use_cuda_graph = wp.get_device().is_cuda and wp.is_mempool_enabled(wp.get_device())
-        # if self.use_cuda_graph:
-        #     with wp.ScopedCapture() as capture:
-        #         self.simulate()
-        #     self.graph = capture.graph
-        #     # self.graph = None
-        # else:
-        #     self.graph = None
-
-
-    # def simulate(self):
-    #     for _ in range(self.sim_substeps):
-    #         self.state_0.clear_forces()
-    #         self.contacts = self.model.collide(self.state_0)
-    #         self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.sim_dt)
-    #         self.state_0, self.state_1 = self.state_1, self.state_0
     def simulate_robot(self):
+        self.contacts = None
+
         for _ in range(self.sim_substeps):
             self.state_0.clear_forces()
-            self.contacts = self.model.collide(self.state_0, rigid_contact_margin=0.0)
 
-
+            # self.contacts not needed for mujoco solver
+            if not isinstance(self.solver, MuJoCoSolver):
+                self.contacts = self.model.collide(self.state_0, rigid_contact_margin=0.01)
 
             # self.controller.assign_control(self.control, self.state_0)
             # TODO: add control
@@ -282,27 +282,17 @@ class Excavator:
         # solve in-place, avoids having to resync robot sim state
         self.mpm_solver.step(self.state_0, self.state_0, contacts=None, control=None, dt=self.frame_dt)
 
-    # def step(self):
-    #     with wp.ScopedTimer("simulate", synchronize=True):
-    #         self.simulate()
-    #     self.sim_time += self.frame_dt
-
-    # def step(self):
-    #     with wp.ScopedTimer("step"):
-    #         if self.use_cuda_graph:
-    #             wp.capture_launch(self.graph)
-    #         else:
-    #             self.simulate()
-    #     self.sim_time += self.frame_dt
-
     def step(self):
-        with wp.ScopedTimer("step", synchronize=True):
+        # TODO: change bac to True
+        with wp.ScopedTimer("step", synchronize=False):
             if self.use_cuda_graph:
                 wp.capture_launch(self.robot_graph)
             else:
                 self.simulate_robot()
             
-            self.simulate_sand()
+            # TODO: Uncomment
+            # self.simulate_sand()
+
             # self.controller.get_control(self.state_0)
 
         self.sim_time += self.frame_dt
@@ -311,10 +301,11 @@ class Excavator:
         if self.renderer is None:
             return
         
-        with wp.ScopedTimer("render", synchronize=True):
+        # TODO: change bac to True
+        with wp.ScopedTimer("render", synchronize=False):
             self.renderer.begin_frame(self.sim_time)
             self.renderer.render(self.state_0)
-            self.renderer.render_contacts(self.state_0, self.contacts, contact_point_radius=1e-2)
+            # self.renderer.render_contacts(self.state_0, self.contacts, contact_point_radius=1e-2)
             self.renderer.end_frame()
 
     def _update_collider_mesh(self, state):
@@ -429,13 +420,14 @@ if __name__ == "__main__":
     # parser.add_argument("--collider", type=str)
 
     # parser.add_argument("--urdf", type=str, default="./assets/excavator.urdf")
-    parser.add_argument("--gravity", type=float, nargs=3, default=[0, 0, -10])
+    # parser.add_argument("--gravity", type=float, nargs=3, default=[0, 0, -10])
     parser.add_argument("--fps", type=float, default=60.0)
     parser.add_argument("--substeps", type=int, default=2)
     parser.add_argument("--max_fraction", type=float, default=1.0)
     parser.add_argument("--voxel_size", "-dx", type=float, default=0.1)
     parser.add_argument("--num_frames", type=int, default=500, help="Total number of frames.")
     parser.add_argument("--headless", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--show_mujoco_viewer", action=argparse.BooleanOptionalAction, default=True)
 
     # NOTE: Update these for sand
     parser.add_argument("--friction_coeff", "-mu", type=float, default=0.5)  # for sand
@@ -460,6 +452,10 @@ if __name__ == "__main__":
         sys.exit(1)
 
     # define two dunes
+    # dunes = [
+    #     {"center": (2.5,  1.0), "amplitude": 0.5, "sigma": 0.3},
+    #     {"center": (3.5, 2.5), "amplitude": 0.7, "sigma": 0.4},
+    # ]
     dunes = [
         {"center": (0.0,  1.0), "amplitude": 0.5, "sigma": 0.3},
         {"center": (1.5, -0.5), "amplitude": 0.7, "sigma": 0.4},
@@ -468,9 +464,24 @@ if __name__ == "__main__":
     with wp.ScopedDevice(args.device):
         sim = Excavator(dunes, args)
 
+        if args.show_mujoco_viewer:
+            import mujoco
+            import mujoco.viewer
+            import mujoco_warp
+
+            mjm, mjd = sim.solver.mj_model, sim.solver.mj_data
+            m, d = sim.solver.mjw_model, sim.solver.mjw_data
+            viewer = mujoco.viewer.launch_passive(mjm, mjd)
+
         for _ in range(args.num_frames):
             sim.step()
             sim.render()
+
+            if args.show_mujoco_viewer:
+                # !!! ISSUE: .get_data_into method not working. This worked for all the other examples 
+                if not sim.solver.use_mujoco:
+                    mujoco_warp.get_data_into(mjd, mjm, d)
+                viewer.sync()
 
         if sim.renderer:
             sim.renderer.save()
