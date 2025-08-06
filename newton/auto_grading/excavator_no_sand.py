@@ -23,7 +23,7 @@ class Excavator:
         # NOTE: may need to update these
         articulation_builder.default_body_armature = 0.01
         articulation_builder.default_joint_cfg.armature = 0.01
-        articulation_builder.default_joint_cfg.mode = newton.JOINT_MODE_TARGET_POSITION
+        articulation_builder.default_joint_cfg.mode = newton.JOINT_MODE_NONE
         articulation_builder.default_joint_cfg.target_ke = 10.0
         articulation_builder.default_joint_cfg.target_kd = 3.0
 
@@ -35,7 +35,7 @@ class Excavator:
             up_axis=newton.Axis.Z,
             xform=wp.transform([0.0, 0.0, 2.0], wp.quat_identity()),
             floating=None,  
-            # enable_self_collisions=True,
+            enable_self_collisions=True,
             ignore_inertial_definitions=False,
             # force_show_colliders=True,
             ignore_names=["floor", "ground"],
@@ -44,8 +44,8 @@ class Excavator:
         #     Excavator.get_asset("excavator.urdf"),
         #     articulation_builder,
         #     up_axis=newton.Axis.Z,
-        #     xform=wp.transform([0.0, 0.0, 0.0], wp.quat_identity()),
-        #     floating=False,  
+        #     xform=wp.transform([0.0, 0.0, 4.0], wp.quat_identity()),
+        #     floating=None,  
         #     enable_self_collisions=True,
         #     ignore_inertial_definitions=False,
         #     force_show_colliders=True,
@@ -75,13 +75,14 @@ class Excavator:
 
         self.solver = newton.solvers.MuJoCoSolver(self.model, 
                                                   disable_contacts=False,
-                                                  use_mujoco=False,  # needs to be false since parallelizing the MPM solver
+                                                  use_mujoco=True,  # needs to be false since parallelizing the MPM solver
                                                   solver="newton",
-                                                  integrator="euler",
-                                                  iterations=10,
-                                                  ncon_per_env=150,
-                                                  ls_iterations=5,
+                                                  integrator="rk4",
+                                                #   iterations=50,
+                                                  ncon_per_env=None,
+                                                #   ls_iterations=10,
                                                   )
+        # self.solver = newton.solvers.FeatherstoneSolver(self.model)
 
         if options.headless:
             self.renderer = None
@@ -94,8 +95,12 @@ class Excavator:
 
         newton.sim.eval_fk(self.model, self.model.joint_q, self.model.joint_qd, state=self.state_0)
         
-        self.use_cuda_graph = self.device.is_cuda and wp.is_mempool_enabled(wp.get_device()) \
-                                and not self.solver.use_mujoco
+        if isinstance(self.solver, MuJoCoSolver):
+            self.use_cuda_graph = self.device.is_cuda and wp.is_mempool_enabled(wp.get_device()) \
+                                    and not self.solver.use_mujoco
+        else:
+            self.use_cuda_graph = self.device.is_cuda and wp.is_mempool_enabled(wp.get_device())
+
         if self.use_cuda_graph:
             with wp.ScopedCapture() as capture:
                 self.simulate_robot()
@@ -113,6 +118,7 @@ class Excavator:
             if not isinstance(self.solver, MuJoCoSolver):
                 self.contacts = self.model.collide(self.state_0, rigid_contact_margin=0.01)
 
+            self.control = None
             self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.sim_dt)
             self.state_0, self.state_1 = self.state_1, self.state_0
     
@@ -131,7 +137,8 @@ class Excavator:
         with wp.ScopedTimer("render"):
             self.renderer.begin_frame(self.sim_time)
             self.renderer.render(self.state_0)
-            # self.renderer.render_contacts(self.state_0, self.contacts, contact_point_radius=1e-2)
+            if not isinstance(self.solver, MuJoCoSolver):
+                self.renderer.render_contacts(self.state_0, self.contacts, contact_point_radius=1e-2)
             self.renderer.end_frame()
 
     #
@@ -165,9 +172,12 @@ if __name__ == "__main__":
     parser.add_argument("--voxel_size", "-dx", type=float, default=0.1)
     parser.add_argument("--num_frames", type=int, default=500, help="Total number of frames.")
     parser.add_argument("--headless", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--show_mujoco_viewer", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--show_mujoco_viewer", action=argparse.BooleanOptionalAction, default=False)
  
     args = parser.parse_known_args()[0]
+
+    wp.config.verbose = True
+    wp.config.mode = "debug"
 
     if wp.get_device(args.device).is_cpu:
         print("Error: This example requires a GPU device.")
@@ -176,10 +186,10 @@ if __name__ == "__main__":
     with wp.ScopedDevice(args.device):
         sim = Excavator(args)
 
-        if args.show_mujoco_viewer:
+        if args.show_mujoco_viewer and isinstance(sim.solver, MuJoCoSolver):
             import mujoco
             import mujoco.viewer
-            import mujoco_warp
+            import mujoco_warp.mujoco_warp as mujoco_warp
 
             mjm, mjd = sim.solver.mj_model, sim.solver.mj_data
             m, d = sim.solver.mjw_model, sim.solver.mjw_data
@@ -189,7 +199,7 @@ if __name__ == "__main__":
             sim.step()
             sim.render()
 
-            if args.show_mujoco_viewer:
+            if args.show_mujoco_viewer and isinstance(sim.solver, MuJoCoSolver):
                 # !!! ISSUE: .get_data_into method not working? This worked for all the other examples 
                 if not sim.solver.use_mujoco:
                     mujoco_warp.get_data_into(mjd, mjm, d)

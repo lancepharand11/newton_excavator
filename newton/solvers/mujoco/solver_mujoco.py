@@ -50,7 +50,7 @@ def import_mujoco():
     """Import the MuJoCo Warp dependencies."""
     try:
         import mujoco  # noqa: PLC0415
-        import mujoco_warp  # noqa: PLC0415
+        import mujoco_warp.mujoco_warp as mujoco_warp  # noqa: PLC0415
     except ImportError as e:
         raise ImportError(
             "MuJoCo backend not installed. Please refer to https://github.com/google-deepmind/mujoco_warp for installation instructions."
@@ -1113,6 +1113,7 @@ class MuJoCoSolver(SolverBase):
                 device=model.device,
             )
 
+
     @staticmethod
     def color_collision_shapes(model: Model, selected_shapes: nparray, visualize_graph: bool = False) -> np.ndarray:
         """
@@ -1807,7 +1808,7 @@ class MuJoCoSolver(SolverBase):
                 for geom_idx, shape_idx in reverse_shape_mapping.items():
                     to_newton_shape_array[geom_idx] = shape_idx
             model.to_newton_shape_index = wp.array(to_newton_shape_array, dtype=wp.int32)  # pyright: ignore[reportAttributeAccessIssue]
-
+            
             self.mjw_model = mujoco_warp.put_model(self.mj_model)
             self.mjw_model.opt.graph_conditional = newton.utils.check_conditional_graph_support()
 
